@@ -1,0 +1,12 @@
+name: exAuth
+main: exAuth.exAuth
+version: 1.0
+commands:
+    login:
+        description: Logs an user in.
+        usage: /login
+    logout:
+        description: Logs off an user.
+        usage: /login
+description: >
+             exAuth is an authentication plugin for bukkit.
