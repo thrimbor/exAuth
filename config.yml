@@ -7,7 +7,7 @@ db:
     table: usertable
     userfield: username
     passfield: password
-    encryption: SHA-512
+    algorithm: SHA-512
 string:
     join: This server is running exAuth. Use /login PASSWORD to log in.
     login_missing_parameter: You must specify a password, usage is /login PASSWORD

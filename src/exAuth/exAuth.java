@@ -1,6 +1,5 @@
 package exAuth;
 
-
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
@@ -10,6 +9,8 @@ import org.bukkit.plugin.PluginDescriptionFile;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.io.UnsupportedEncodingException;
+import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -17,81 +18,92 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
-public class exAuth extends JavaPlugin
-{
+public class exAuth extends JavaPlugin {
 	public static exAuth plugin;
 	public final Logger logger = Logger.getLogger("Minecraft");
-	public MyEventListener eventListener;
+	public EventListener eventListener;
 	public PluginDescriptionFile pdfFile;
 	
-	public ArrayList<String> authenticated_players = new ArrayList<String>();
-	public HashMap<String, ItemStack[]> saved_inventories = new HashMap<String, ItemStack[]>();
+	private ArrayList<String> authenticated_players = new ArrayList<String>();
+	private HashMap<String, ItemStack[]> saved_inventories = new HashMap<String, ItemStack[]>();
 	
-	public HashMap<String, Boolean> player_state;
-	//private Connection con = null;
 	private String sql_user;
 	private String sql_pass;
 	private String sql_url;
 	private String sql_table;
 	private String sql_userfield;
 	private String sql_passfield;
-	private String sql_encryption;
+	private String sql_algorithm;
 	public String join_string;
 	private String login_missing_parameter_string;
 	
 	@Override
-	public void onDisable()
-	{
+	public synchronized void onDisable() {
 		PluginDescriptionFile pdfFile = this.getDescription();
 		this.logger.info(pdfFile.getName() + " is now disabled.");
 	}
 	
-	public boolean onCommand (CommandSender sender, Command cmd, String label, String[] args)
-	{
-		if (cmd.getName().equalsIgnoreCase("login"))
-		{
-			if (sender instanceof Player)
-			{
-				try
-				{
-					this.log_in((Player) sender, args[0]);
-				}
-				catch (ArrayIndexOutOfBoundsException e)
-				{
+	@Override
+	public synchronized boolean onCommand (CommandSender sender, Command cmd, String label, String[] args) {
+		if (cmd.getName().equalsIgnoreCase("login")) {
+			if (sender instanceof Player) {
+				try {
+					this.logIn((Player) sender, args[0]);
+				} catch (ArrayIndexOutOfBoundsException e) {
 					((Player) sender).sendMessage(ChatColor.RED + "[SERVER] " + ChatColor.WHITE + this.login_missing_parameter_string);
 				}
 				
 				return true;
-			} else
+			} else {
 				this.logger.info(this.pdfFile.getName() + ": The /login command can only be used in game");
-		}
-		else if (cmd.getName().equalsIgnoreCase("logout"))
-		{
-			if (sender instanceof Player)
-			{
-				this.log_out((Player) sender);
+			}
+		} else if (cmd.getName().equalsIgnoreCase("logout")) {
+			if (sender instanceof Player) {
+				this.logOut((Player) sender);
 				return true;
-			} else
-				this.logger.info(this.pdfFile.getName() + ": The /login command can only be used in game");
+			} else {
+				this.logger.info(this.pdfFile.getName() + ": The /logout command can only be used in game");
+			}
 		}
 		return false;
 	}
 	
+	public synchronized void playerJoined (Player player) {
+		// save the players inventory
+		this.saved_inventories.put(player.getName(), player.getInventory().getContents());
+		
+		// clear the inventory
+		player.getInventory().clear();
+		
+		// send the player a nice message
+		player.sendMessage(ChatColor.RED + "[SERVER] " + ChatColor.WHITE + this.join_string);
+	}
+	
+	public synchronized void playerQuit (Player player) {
+		if (this.isAuthenticated(player)) {
+			// log him out
+			this.authenticated_players.remove(player.getName());
+		} else {
+			// restore inventory
+			player.getInventory().setContents(this.saved_inventories.get(player.getName()));
+			
+			// remove inventory from the list
+			this.saved_inventories.remove(player.getName());
+		}
+	}
+	
 	@Override
-	public void onEnable()
-	{
+	public synchronized void onEnable() {
 		PluginManager pm = getServer().getPluginManager();
 		this.pdfFile = this.getDescription();
 		
 		// create an instance of the jdbc mysql-driver
-		try
-		{
+		try {
 			Class.forName("com.mysql.jdbc.Driver").newInstance();
-		}
-		catch (Exception e)
-		{
+		} catch (Exception e) {
 			this.logger.info(pdfFile.getName() + ": Could not create jdbc driver instance");
 			e.printStackTrace();
 			return;
@@ -112,30 +124,25 @@ public class exAuth extends JavaPlugin
 		this.sql_table = this.getConfig().getString("db.table");
 		this.sql_userfield = this.getConfig().getString("db.userfield");
 		this.sql_passfield = this.getConfig().getString("db.passfield");
-		this.sql_encryption = this.getConfig().getString("db.encryption");
+		this.sql_algorithm = this.getConfig().getString("db.algorithm");
 		
 		// now register the events
-		this.eventListener = new MyEventListener(this);
+		this.eventListener = new EventListener(this);
 		pm.registerEvents(this.eventListener, this);
 		
 		this.logger.info(pdfFile.getName() + " version " + pdfFile.getVersion() + " is enabled.");
 	}
 	
-	private void log_in (Player player, String password)
-	{
-		if (this.authenticated_players.contains(player.getName()))
-		{
+	private synchronized void logIn (Player player, String password) {
+		if (this.authenticated_players.contains(player.getName())) {
 			player.sendMessage(ChatColor.RED + "[SERVER] " + ChatColor.WHITE + "You are already logged in.");
 			return;
 		}
 		
 		Connection con;
-		try
-		{
+		try {
 			con = DriverManager.getConnection(this.sql_url, this.sql_user, this.sql_pass);
-		}
-		catch (SQLException e)
-		{
+		} catch (SQLException e) {
 			this.logger.info(pdfFile.getName() + ": Could not connect to database. Login of " + player.getName() + " failed.");
 			e.printStackTrace();
 			return;
@@ -145,59 +152,61 @@ public class exAuth extends JavaPlugin
 		ResultSet rs = null;
 		String hash = "";
 		
-		if (this.sql_encryption.equalsIgnoreCase("MD5"))
-			hash = Encryption.MD5(password);
-		else if (this.sql_encryption.equalsIgnoreCase("SHA-256"))
-			hash = Encryption.SHA256(password);
-		else if (this.sql_encryption.equalsIgnoreCase("SHA-512"))
-			hash = Encryption.SHA512(password);
-		else if (this.sql_encryption.equalsIgnoreCase("SHA1"))
-			hash = Encryption.SHA1(password);
-		
-		String query = ("SELECT COUNT(*) AS counter FROM " + this.sql_table + " WHERE " + this.sql_userfield + "='" + player.getName() + "' AND " + this.sql_passfield + "='" + hash + "';");
-		
-		try
-		{
-			stmt = con.createStatement();
-			rs = stmt.executeQuery(query);
-		}
-		catch (SQLException e)
-		{
+		try {
+			if (this.sql_algorithm.equalsIgnoreCase("MD5"))
+				hash = Hash.MD5(password);
+			else if (this.sql_algorithm.equalsIgnoreCase("SHA-256"))
+				hash = Hash.SHA256(password);
+			else if (this.sql_algorithm.equalsIgnoreCase("SHA-512"))
+				hash = Hash.SHA512(password);
+			else if (this.sql_algorithm.equalsIgnoreCase("SHA1"))
+				hash = Hash.SHA1(password);
+		} catch (NoSuchAlgorithmException e) {
+			this.logger.log(Level.WARNING, "Unsupported algorithm: " + this.sql_algorithm);
+			e.printStackTrace();
+			return;
+		} catch (UnsupportedEncodingException e) {
 			e.printStackTrace();
 			return;
 		}
 		
-		try
-		{
+		String query = ("SELECT COUNT(*) AS counter FROM " + this.sql_table + " WHERE " + this.sql_userfield + "='" + player.getName() + "' AND " + this.sql_passfield + "='" + hash + "';");
+		
+		try {
+			stmt = con.createStatement();
+			rs = stmt.executeQuery(query);
+		} catch (SQLException e) {
+			e.printStackTrace();
+			return;
+		}
+		
+		try {
 			rs.next();
-			if (rs.getInt("counter") == 1)
-			{
+			if (rs.getInt("counter") == 1) {
+				// login successful
 				this.authenticated_players.add(player.getName());
 				player.sendMessage(ChatColor.RED + "[SERVER] " + ChatColor.WHITE + "You are now logged in.");
+				
 				// restore his inventory
 				player.getInventory().setContents(this.saved_inventories.get(player.getName()));
-				// remove his inventory from the backup-list
+				
+				// remove his inventory from the list
 				this.saved_inventories.remove(player.getName());
-			}
-			else
-			{
+			} else {
+				// login failed
 				player.sendMessage(ChatColor.RED + "[SERVER]" + ChatColor.WHITE + "Incorrect username/password");
 			}
 			
 			con.close();
-		}
-		catch (SQLException e)
-		{
+		} catch (SQLException e) {
 			e.printStackTrace();
 			return;
 		}
 		return;
 	}
 	
-	private void log_out (Player player)
-	{
-		if (!this.authenticated_players.contains(player.getName()))
-		{
+	private synchronized void logOut (Player player) {
+		if (!this.authenticated_players.contains(player.getName())) {
 			player.sendMessage(ChatColor.RED + "[SERVER] " + ChatColor.WHITE + "You are already logged out.");
 			return;
 		}
@@ -212,4 +221,7 @@ public class exAuth extends JavaPlugin
 		player.getInventory().clear();
 	}
 	
+	public synchronized boolean isAuthenticated (Player player) {
+		return this.authenticated_players.contains(player.getName());
+	}
 }
