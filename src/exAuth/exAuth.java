@@ -27,8 +27,8 @@ public class exAuth extends JavaPlugin {
 	public EventListener eventListener;
 	public PluginDescriptionFile pdfFile;
 	
-	private ArrayList<String> authenticated_players = new ArrayList<String>();
-	private HashMap<String, ItemStack[]> saved_inventories = new HashMap<String, ItemStack[]>();
+	private ArrayList<Player> authenticated_players = new ArrayList<Player>();
+	private HashMap<Player, ItemStack[]> saved_inventories = new HashMap<Player, ItemStack[]>();
 	
 	private String sql_user;
 	private String sql_pass;
@@ -73,7 +73,7 @@ public class exAuth extends JavaPlugin {
 	
 	public synchronized void playerJoined (Player player) {
 		// save the players inventory
-		this.saved_inventories.put(player.getName(), player.getInventory().getContents());
+		this.saved_inventories.put(player, player.getInventory().getContents());
 		
 		// clear the inventory
 		player.getInventory().clear();
@@ -85,13 +85,13 @@ public class exAuth extends JavaPlugin {
 	public synchronized void playerQuit (Player player) {
 		if (this.isAuthenticated(player)) {
 			// log him out
-			this.authenticated_players.remove(player.getName());
+			this.authenticated_players.remove(player);
 		} else {
 			// restore inventory
-			player.getInventory().setContents(this.saved_inventories.get(player.getName()));
+			player.getInventory().setContents(this.saved_inventories.get(player));
 			
 			// remove inventory from the list
-			this.saved_inventories.remove(player.getName());
+			this.saved_inventories.remove(player);
 		}
 	}
 	
@@ -134,7 +134,7 @@ public class exAuth extends JavaPlugin {
 	}
 	
 	private synchronized void logIn (Player player, String password) {
-		if (this.authenticated_players.contains(player.getName())) {
+		if (this.authenticated_players.contains(player)) {
 			player.sendMessage(ChatColor.RED + "[SERVER] " + ChatColor.WHITE + "You are already logged in.");
 			return;
 		}
@@ -184,14 +184,14 @@ public class exAuth extends JavaPlugin {
 			rs.next();
 			if (rs.getInt("counter") == 1) {
 				// login successful
-				this.authenticated_players.add(player.getName());
+				this.authenticated_players.add(player);
 				player.sendMessage(ChatColor.RED + "[SERVER] " + ChatColor.WHITE + "You are now logged in.");
 				
 				// restore his inventory
-				player.getInventory().setContents(this.saved_inventories.get(player.getName()));
+				player.getInventory().setContents(this.saved_inventories.get(player));
 				
 				// remove his inventory from the list
-				this.saved_inventories.remove(player.getName());
+				this.saved_inventories.remove(player);
 			} else {
 				// login failed
 				player.sendMessage(ChatColor.RED + "[SERVER]" + ChatColor.WHITE + "Incorrect username/password");
@@ -206,22 +206,22 @@ public class exAuth extends JavaPlugin {
 	}
 	
 	private synchronized void logOut (Player player) {
-		if (!this.authenticated_players.contains(player.getName())) {
+		if (!this.authenticated_players.contains(player)) {
 			player.sendMessage(ChatColor.RED + "[SERVER] " + ChatColor.WHITE + "You are already logged out.");
 			return;
 		}
 		
-		this.authenticated_players.remove(player.getName());
+		this.authenticated_players.remove(player);
 		player.sendMessage(ChatColor.RED + "[SERVER] " + ChatColor.WHITE + "You are now logged out.");
 		
 		// save the player's inventory
-		this.saved_inventories.put(player.getName(), player.getInventory().getContents());
+		this.saved_inventories.put(player, player.getInventory().getContents());
 		
 		// clear it
 		player.getInventory().clear();
 	}
 	
 	public synchronized boolean isAuthenticated (Player player) {
-		return this.authenticated_players.contains(player.getName());
+		return this.authenticated_players.contains(player);
 	}
 }
